@@ -194,6 +194,28 @@ class Hm_PHP_Session extends Hm_PHP_Session_Data {
         if ($user !== false && $pass !== false) {
             if ($this->auth($user, $pass)) {
                 $this->authed($request, $fingerprint);
+            } else {
+                if (class_exists('Hm_Logger', false)) {
+                    try {
+                        /* For the main message we trust PHP to give us the right IP address */
+                        $auth_error_message="Failed authentication from [".$request->server["REMOTE_ADDR"]."]";
+                        /* In the context, we will provide additional HTTP headers where the right information could be stored */
+                        /* especially if we are being a reverse proxy */
+                        $auth_error_context=array(
+                            "type"                  => "failed_auth",
+                            "user"                  => substr($user,0,255),
+                            "REMOTE_ADDR"           => $request->server["REMOTE_ADDR"],
+                            "HTTP_FORWARDED"        => $request->server["HTTP_FORWARDED"]??null,
+                            "HTTP_X_FORWARDED_FOR"  => $request->server["HTTP_X_FORWARDED_FOR"]??null,
+                            "HTTP_CLIENT_IP"        => $request->server["HTTP_CLIENT_IP"]??null
+                            );
+                        Hm_Logger::getInstance()->log($auth_error_message,"error",$auth_error_context);
+                    } catch (\Throwable $e) {
+                        if(php_sapi_name() !== 'cli') {
+                            error_log("Error while trying to log failed_auth : "+$e->getMessage());
+                        }
+                    }
+                }
             }
         } elseif (array_key_exists($this->cname, $request->cookie)) {
             $this->get_key($request);
