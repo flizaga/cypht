@@ -2,13 +2,16 @@
  * Possible Sieve fields
  * @type {{Message: [{name: string, options: string[], type: string, selected: boolean},{name: string, options: string[], type: string},{name: string, options: string[], type: string}], Header: [{name: string, options: string[], type: string},{name: string, options: string[], type: string},{name: string, options: string[], type: string},{name: string, options: string[], type: string}]}}
  */
-let is_editing_script = false;
-let current_editing_script_name = "";
-// let hm_sieve_current_account = "";
-let current_account;
-let current_account_element;
-let is_editing_filter = false;
-let current_editing_filter_name = '';
+
+// Prefer variables declared with var for better function scope handling,
+// as some of these cause runtime errors in Tiki on conflicting names
+var is_editing_script = false;
+var current_editing_script_name = "";
+// var hm_sieve_current_account = "";
+var current_account;
+var current_account_element;
+var is_editing_filter = false;
+var current_editing_filter_name = '';
 
 var hm_sieve_condition_fields = function() {
     return {
@@ -123,6 +126,8 @@ function add_filter_match_mode() {
                 "</div>"
             );
         }
+    } else {
+        $(".sieve_match_mode").remove();
     }
 }
 
@@ -261,8 +266,24 @@ var hm_sieve_possible_actions = function() {
     ];
 };
 
+var find_account_element = function(account_name) {
+    const accountElement = $('.add_filter, .edit_filter, .edit_script').filter(function () {
+        return $(this).attr('account') === account_name ||
+            $(this).attr('imap_account') === account_name;
+    }).first();
+
+    return accountElement.length ? accountElement : null;
+};
+
 var get_account_actions = () => {
-    const extensions = JSON.parse(current_account_element.attr('sieve_extensions'));
+    if (!current_account_element || !current_account_element.length) {
+        current_account_element = find_account_element(current_account);
+    }
+
+    const extensionsAttr = current_account_element
+        ? current_account_element.attr('sieve_extensions')
+        : null;
+    const extensions = extensionsAttr ? JSON.parse(extensionsAttr) : [];
     let possible_actions = hm_sieve_possible_actions();
 
     possible_actions = possible_actions.filter((value) => {
@@ -270,39 +291,6 @@ var get_account_actions = () => {
     })
 
     return possible_actions;
-}
-
-class Hm_Filter_Modal extends Hm_Modal {
-    constructor(current_account) {
-        super({
-            size: "xl",
-            modalId: "myEditFilterModal",
-        });
-        const save_filter = Hm_Filters.save_filter;
-        const modalContent = document.querySelector("#edit_filter_modal");
-        if (modalContent) {
-            this.setContent(modalContent.innerHTML);
-            modalContent.remove();
-        } else {
-            this.setContent("<p>Could not load filter editor</p>");
-        }
-
-        this.addFooterBtn("Save", "btn-primary ms-auto", async () => {
-            let result = save_filter(current_account);
-            if (result) {
-                Hm_Notices.show("Filter saved", "success");
-                this.hide();
-            }
-        });
-
-        this.addFooterBtn("Convert to code", "btn-warning", async () => {
-            let result = save_filter(current_account, true);
-            if (result) {
-                Hm_Notices.show("Filter saved", "success");
-                this.hide();
-            }
-        });
-    }
 }
 
 function createSaveFilter({
@@ -484,6 +472,7 @@ const Hm_Filters = (function (hm) {
                 {'name': 'conditions_json', 'value': JSON.stringify(conditions_parsed)},
                 {'name': 'actions_json', 'value': JSON.stringify(actions_parsed)},
                 {'name': 'filter_test_type', 'value': $('.modal_sieve_filter_test').val()},
+                {'name': 'filter_source', 'value': getPageNameParam()},
                 {'name': 'gen_script', 'value': gen_script},
             ],
             function(res) {
@@ -630,43 +619,18 @@ const add_filter_action = Hm_Filters.add_filter_action;
 /**************************************************************************************
 *                                      MODAL EVENTS
 **************************************************************************************/
-const hm_sieve_button_events = (edit_filter_modal, edit_script_modal) => {
-    $(document).off('click', '.sievefilters_accounts_title').on('click', '.sievefilters_accounts_title', function() {
-        $(this).parent().find('.sievefilters_accounts').toggleClass('d-none');
-    });
 
-    $(document).on('click', '.add_filter', function() {
-        edit_filter_modal.setTitle('Add Filter');
-        $('.modal_sieve_filter_priority').val('');
-        $('.modal_sieve_filter_test').val('ALLOF');
-        $('#stop_filtering').prop('checked', false);
-        current_account = $(this).attr('account');
-        current_account_element = $(this);
-        edit_filter_modal.open();
-
-        // Reset the form fields when opening the modal
-        $(".modal_sieve_filter_name").val('');
-        $(".modal_sieve_script_priority").val('');
-        $(".sieve_list_conditions_modal").empty();
-        $(".filter_actions_modal_table").empty();
-    });
-
-    $(document).on('click', '.add_script', function() {
-        edit_script_modal.setTitle('Add Script');
-        $('.modal_sieve_script_textarea').val('');
-        $('.modal_sieve_script_name').val('');
-        $('.modal_sieve_script_priority').val('');
-        is_editing_script = false;
-        current_editing_script_name = '';
-        current_account = $(this).attr('account');
-        current_account_element = $(this);
-        edit_script_modal.open();
-    });
-
+/**
+ * Shared modal-internal event handlers.
+ * Registers delegated handlers for interactions inside any sieve filter/script
+ * modal (add/delete conditions, add/delete actions, select changes).
+ * Called globally on document ready so they work on every page.
+ */
+const registerSieveModalEvents = () => {
     /**
      * Delete action Button
      */
-    $(document).on('click', '.delete_else_action_modal_button', function (e) {
+    $(document).off('click', '.delete_else_action_modal_button').on('click', '.delete_else_action_modal_button', function (e) {
         e.preventDefault();
         $(this).parent().parent().remove();
     });
@@ -674,7 +638,7 @@ const hm_sieve_button_events = (edit_filter_modal, edit_script_modal) => {
     /**
      * Delete action Button
      */
-    $(document).on('click', '.delete_action_modal_button', function (e) {
+    $(document).off('click', '.delete_action_modal_button').on('click', '.delete_action_modal_button', function (e) {
         e.preventDefault();
         $(this).parent().parent().remove();
     });
@@ -682,7 +646,7 @@ const hm_sieve_button_events = (edit_filter_modal, edit_script_modal) => {
     /**
      * Delete Condition Button
      */
-    $(document).on('click', '.delete_condition_modal_button', function (e) {
+    $(document).off('click', '.delete_condition_modal_button').on('click', '.delete_condition_modal_button', function (e) {
         e.preventDefault();
         $(this).parent().parent().remove();
     });
@@ -735,7 +699,7 @@ const hm_sieve_button_events = (edit_filter_modal, edit_script_modal) => {
     /**
      * Action change
      */
-    $(document).on('change', '.sieve_actions_select', function () {
+    $(document).off('change', '.sieve_actions_select').on('change', '.sieve_actions_select', function () {
         let tr_elem = $(this).parent().parent();
         console.log(tr_elem.attr('default_value'));
         let elem = $(this).parent().next().next();
@@ -806,7 +770,7 @@ const hm_sieve_button_events = (edit_filter_modal, edit_script_modal) => {
     /**
      * Condition type change
      */
-    $(document).on('change', '.add_condition_sieve_filters', function () {
+    $(document).off('change', '.add_condition_sieve_filters').on('change', '.add_condition_sieve_filters', function () {
         let condition_name = $(this).val();
         let elem = $(this).parent().next().next().find('.condition_options');
         let elem_extra = $(this).parent().next().find('.condition_extra_value');
@@ -848,11 +812,50 @@ const hm_sieve_button_events = (edit_filter_modal, edit_script_modal) => {
             }
         }
     });
+};
+
+/**
+ * Page-specific event handlers for the sieve filters page.
+ * These require modal instances or operate on elements that only exist
+ * on the sieve filters settings page.
+ */
+const registerSievePageEvents = (edit_filter_modal, edit_script_modal) => {
+    $(document).off('click', '.sievefilters_accounts_title').on('click', '.sievefilters_accounts_title', function() {
+        $(this).parent().find('.sievefilters_accounts').toggleClass('d-none');
+    });
+
+    $(document).off('click', '.add_filter').on('click', '.add_filter', function() {
+        edit_filter_modal.setTitle('Add Filter');
+        $('.modal_sieve_filter_priority').val('');
+        $('.modal_sieve_filter_test').val('ALLOF');
+        $('#stop_filtering').prop('checked', false);
+        current_account = $(this).attr('account');
+        current_account_element = $(this);
+        edit_filter_modal.open();
+
+        // Reset the form fields when opening the modal
+        $(".modal_sieve_filter_name").val('');
+        $(".modal_sieve_script_priority").val('');
+        $(".sieve_list_conditions_modal").empty();
+        $(".filter_actions_modal_table").empty();
+    });
+
+    $(document).off('click', '.add_script').on('click', '.add_script', function() {
+        edit_script_modal.setTitle('Add Script');
+        $('.modal_sieve_script_textarea').val('');
+        $('.modal_sieve_script_name').val('');
+        $('.modal_sieve_script_priority').val('');
+        is_editing_script = false;
+        current_editing_script_name = '';
+        current_account = $(this).attr('account');
+        current_account_element = $(this);
+        edit_script_modal.open();
+    });
 
     /**
      * Delete filter event
      */
-    $(document).on('click', '.delete_filter', function (e) {
+    $(document).off('click', '.delete_filter').on('click', '.delete_filter', function (e) {
         e.preventDefault();
         if (!confirm('Do you want to delete filter?')) {
             return;
@@ -873,7 +876,7 @@ const hm_sieve_button_events = (edit_filter_modal, edit_script_modal) => {
     /**
      * Toggle Filter
      */
-    $('.toggle_filter').on('change', function () {
+    $('.toggle_filter').off('change').on('change', function () {
         const checkbox = $(this);
         Hm_Ajax.request(
             [   {'name': 'hm_ajax_hook', 'value': 'ajax_sieve_toggle_script_state'},
@@ -891,7 +894,7 @@ const hm_sieve_button_events = (edit_filter_modal, edit_script_modal) => {
     /**
      * Delete script event
      */
-    $(document).on('click', '.delete_script', function (e) {
+    $(document).off('click', '.delete_script').on('click', '.delete_script', function (e) {
         e.preventDefault();
         if (!confirm('Do you want to delete script?')) {
             return;
@@ -912,7 +915,7 @@ const hm_sieve_button_events = (edit_filter_modal, edit_script_modal) => {
     /**
      * Edit script event
      */
-    $(document).on('click', '.edit_script', function (e) {
+    $(document).off('click', '.edit_script').on('click', '.edit_script', function (e) {
         e.preventDefault();
         let obj = $(this);
         edit_script_modal.setTitle('Edit Script');
@@ -936,7 +939,7 @@ const hm_sieve_button_events = (edit_filter_modal, edit_script_modal) => {
     /**
      * Edit filter event
      */
-    $(document).on('click', '.edit_filter', function (e) {
+    $(document).off('click', '.edit_filter').on('click', '.edit_filter', function (e) {
         e.preventDefault();
         let obj = $(this);
         current_account = $(this).attr('account');
@@ -985,6 +988,7 @@ const hm_sieve_button_events = (edit_filter_modal, edit_script_modal) => {
                         }
                     }
                 });
+                add_filter_match_mode();
                 edit_filter_modal.setTitle(current_editing_filter_name);
                 edit_filter_modal.open();
             }
@@ -1003,8 +1007,6 @@ const hm_sieve_button_events = (edit_filter_modal, edit_script_modal) => {
             ghostClass: "sortable-ghost",
         });
     }
-
-    return true;
 };
 
 function blockListPageHandlers() {
@@ -1243,7 +1245,7 @@ function sieveFiltersPageHandler() {
     /**************************************************************************************
      * Initialize sieve button events
      **************************************************************************************/
-    hm_sieve_button_events(edit_filter_modal, edit_script_modal);
+    registerSievePageEvents(edit_filter_modal, edit_script_modal);
 
     const save_script = Hm_Filters.save_script;
     // const save_filter = Hm_Filters.save_filter;
@@ -1273,6 +1275,7 @@ function get_list_block_sieve() {
 function populateFilterFromDraft(filterDraft) {
     $('.sieve_list_conditions_modal').empty();
     $('.filter_actions_modal_table').empty();
+    $('.sieve_match_mode').remove();
 
     (filterDraft.from || []).forEach((fromVal) => {
         add_filter_condition();
@@ -1310,26 +1313,10 @@ function populateFilterFromDraft(filterDraft) {
     if ($('.filter_actions_modal_table tr').length === 0) {
         add_filter_action();
     }
-}
 
-function renderChips(container, values, type = 'email') {
-    const $c = $(container).empty();
-    const chipClass = type === 'email' ? 'email-chip' : 'keyword-chip';
-
-    values.forEach((val) => {
-        const chip = $(`<div class="chip" data-value="${val}">
-                <span ${chipClass}">
-                    ${val}
-                </span>
-                <button type="button" class="chip-remove" aria-label="Remove">
-                    x
-                </button>
-            </div>
-        `);
-
-        chip.find('.chip-remove').on('click', () => chip.remove());
-        $c.append(chip);
-    });
+    window.setTimeout(function () {
+        add_filter_match_mode();
+    }, 0);
 }
 
 function collectChips(container) {
@@ -1339,12 +1326,11 @@ function collectChips(container) {
         .get();
 }
 
-let custom_action_modal;
 let current_mailbox_for_filter;
 let edit_filter_modal_for_custom_actions;
 let edit_filter_template_content;
 
-function createFilterFromList() {
+function createFilterFromList(launcherModal) {
     const froms = collectChips('#filter-from-list');
     const subjects = collectChips('#filter-subject-list');
 
@@ -1355,6 +1341,8 @@ function createFilterFromList() {
 
     // Use the stored mailbox from the button click
     const mailboxName = current_mailbox_for_filter;
+    current_account = mailboxName;
+    current_account_element = find_account_element(mailboxName);
 
     const filterDraft = {
         from: froms,
@@ -1403,7 +1391,7 @@ function createFilterFromList() {
         { isFromMessageList: true },
     );
     edit_filter_modal_for_custom_actions.open();
-    custom_action_modal.hide();
+    launcherModal.hide();
 
     // Remove any previous dry run results
     $('.dry-run-results').remove();
@@ -1539,7 +1527,7 @@ function dryRunFilterFromModal() {
     resultHtml +=
         '<div class="d-flex justify-content-between align-items-center mb-2">' +
         '<h6 class="fw-bold mb-0"><i class="bi bi-lightning me-2"></i>' +
-        hm_trans('Dry Run Results') +
+        hm_trans('Filter Match Preview for Visible Messages') +
         '</h6>' +
         '<button type="button" class="btn btn-sm btn-outline-secondary dry-run-close" aria-label="Close">' +
         '<i class="bi bi-x"></i>' +
@@ -1628,22 +1616,6 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-custom_action_modal = new Hm_Modal({
-    size: 'xl',
-    modalId: 'myCustomActionModal',
-});
-
-custom_action_modal.setTitle(hm_trans('Setup Filter from selected messages'));
-
-custom_action_modal.addFooterBtn(
-    hm_trans('Build Filter'),
-    'btn-primary ms-auto',
-    async function () {
-        createFilterFromList();
-        custom_action_modal.hide();
-    },
-);
-
 $(function () {
     $(document).on('change', '#block_action', function(e) {
         if ($(this).val() == 'reject_with_message') {
@@ -1656,14 +1628,19 @@ $(function () {
     $(document).on("submit", "#create-filter-form", function (e) {
         e.preventDefault();
         current_account = $(this).attr("account");
+        current_account_element = find_account_element(current_account);
 
-        const edit_filter_modal = new Hm_Filter_Modal(current_account);
+        const edit_filter_modal = createEditFilterModal(
+            Hm_Filters.save_filter,
+            function () {
+                return current_account;
+            },
+        );
         edit_filter_modal.setTitle("Add Filter for message like this");
         const add_filter_condition = Hm_Filters.add_filter_condition;
         const add_filter_action = Hm_Filters.add_filter_action;
 
         const $form = $(this);
-        const $btn = $form.find("#create_filter").prop("disabled", true);
         const data = {};
 
         if ($form.find("#use_from").is(":checked"))
@@ -1678,11 +1655,17 @@ $(function () {
         if ($.isEmptyObject(data)) {
             Hm_Notices.show(
                 "Please check at least one condition to create a filter.",
-                "danger"
+                "#create-filter-form"
             );
-            $btn.prop("disabled", false);
             return;
         }
+
+        $('.modal_sieve_filter_name').val('');
+        $('.modal_sieve_filter_priority').val('');
+        $('.modal_sieve_filter_test').val('ALLOF');
+        $('.sieve_list_conditions_modal').empty();
+        $('.filter_actions_modal_table').empty();
+        $('#stop_filtering').prop('checked', false);
 
         edit_filter_modal.open();
 
@@ -1712,6 +1695,8 @@ $(function () {
             $selectOp.val("Contains");
             $inputVal.val(value);
         }
+
+        add_filter_match_mode();
 
         if (data["reply-to"]) {
             add_filter_action("autoreply");
@@ -1838,6 +1823,7 @@ $(function () {
                     }
                 });
 
+                add_filter_match_mode();
                 edit_filter_modal.setTitle(
                     hm_trans('Edit Filter') + ': ' + filterName,
                 );
@@ -1846,217 +1832,7 @@ $(function () {
         );
     });
 
-    $(document).on('click', '#add_custom_action_button', function (e) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        e.stopPropagation();
-
-        const mailbox = $(this).attr('account');
-        current_mailbox_for_filter = mailbox;
-
-        const selected = [];
-
-        console.log('Selected messages for filter creation:');
-        $('.message_table input[type=checkbox]:checked').each(function () {
-            const $row = $(this).closest('tr');
-
-            selected.push({
-                // imap_id: this.value,
-                uid: $row.data('uid'),
-                message_id: $row.data('msg-id'),
-                from_email: ($row.find('td.from').data('title') || '').trim(),
-                subject: $row.find('td.subject a').attr('title') || '',
-            });
-        });
-
-        function extractKeywords(subject) {
-            return subject
-                .toLowerCase()
-                .replace(/[^\w\s]/g, '')
-                .split(/\s+/)
-                .filter((w) => w.length > 3); // ignore small words
-        }
-
-        const fromEmails = [
-            ...new Set(selected.map((m) => m.from_email).filter(Boolean)),
-        ];
-
-        const subjectKeywords = [
-            ...new Set(
-                selected.flatMap((m) => extractKeywords(m.subject || '')),
-            ),
-        ];
-
-        const modalContent = `
-            <div id="create-filter-form">
-                <input type="hidden" id="custom_action_mailbox" value="${mailbox}">
-                    <div class="modal-body">
-                        <div class="filter-section mb-4">
-                            <h6 class="fw-bold mb-3">From emails</h6>
-
-                            <div class="mb-3">
-                            <div class="btn-group btn-group-sm subject-filter-teal" role="group" id="from-filter-type">
-                                <input type="radio" class="btn-check" name="fromFilterType" id="fromMatches" value="matches" checked>
-                                <label class="btn btn-outline-primary" for="fromMatches">
-                                    <i class="bi bi-check-circle me-1"></i> Matches
-                                </label>
-
-                                <input type="radio" class="btn-check" name="fromFilterType" id="fromNotMatches" value="not_matches">
-                                <label class="btn btn-outline-primary" for="fromNotMatches">
-                                    <i class="bi bi-x-circle me-1"></i> Does Not Matches
-                                </label>
-                            </div>
-                        </div>
-
-                        <div id="from-keywords-section">
-                            <div id="filter-from-list" class="chip-container border rounded p-3 mb-3 bg-light"></div>
-                                <div class="input-group">
-                                    <input id="filter-from-input" class="form-control" placeholder="Add email and press Enter">
-                                <div class="input-group-append">
-                                    <span class="input-group-text"><i class="bi bi-plus-circle"></i></span>
-                                </div>
-                            </div>
-                            <small class="form-text text-muted mt-1">Press Enter to add email to filter</small>
-                        </div>
-                    </div>      
-                <hr class="my-4">
-    
-                <div class="filter-section mb-4">
-                    <h6 class="fw-bold mb-3">Subject keywords</h6>
-
-                    <!-- Subject filter type selector -->
-                    <div class="mb-3">
-                        <div class="btn-group btn-group-sm subject-filter-teal" role="group" id="subject-filter-type">
-                            <input type="radio" class="btn-check" name="subjectFilterType" id="subjectContains" value="contains" checked>
-                            <label class="btn btn-outline-primary" for="subjectContains">
-                                <i class="bi bi-check-circle me-1"></i> Contains
-                            </label>
-
-                            <input type="radio" class="btn-check" name="subjectFilterType" id="subjectNotContains" value="not_contains">
-                            <label class="btn btn-outline-primary" for="subjectNotContains">
-                                <i class="bi bi-x-circle me-1"></i> Does Not Contain
-                            </label>
-
-                            <input type="radio" class="btn-check" name="subjectFilterType" id="subjectAny" value="any">
-                            <label class="btn btn-outline-primary" for="subjectAny">
-                                <i class="bi bi-slash-circle me-1"></i> Ignore Subject
-                            </label>
-                        </div>
-                    </div>
-
-                    <div id="subject-keywords-section">
-                        <div id="filter-subject-list" class="chip-container border rounded p-3 mb-3 bg-light"></div>
-                            <div class="input-group">
-                                <input id="filter-subject-input" class="form-control" placeholder="Add keyword and press Enter">
-                                <div class="input-group-append">
-                                    <span class="input-group-text"><i class="bi bi-plus-circle"></i></span>
-                                </div>
-                            </div>
-                            <small class="form-text text-muted mt-1">Press Enter to add keyword to filter</small>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        custom_action_modal.setContent(modalContent);
-        custom_action_modal.open();
-        renderChips('#filter-from-list', fromEmails);
-        renderChips('#filter-subject-list', subjectKeywords);
-
-        attachChipHandlers();
-    });
-
-    function attachChipHandlers() {
-        $('.chip-remove')
-            .off('click')
-            .on('click', function () {
-                $(this).closest('.chip').remove();
-            });
-
-        $('#filter-from-input')
-            .off('keydown')
-            .on('keydown', function (e) {
-                if (e.key === 'Enter' && this.value.trim()) {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    const chip = $(`
-        <span class="chip">
-          ${this.value.trim()}
-          <button type="button" class="chip-remove">×</button>
-        </span>
-      `);
-                    chip.find('.chip-remove').on('click', function () {
-                        $(this).closest('.chip').remove();
-                    });
-                    $('#filter-from-list').append(chip);
-                    this.value = '';
-                }
-            });
-
-        // Similar for filter-subject-input
-        $('#filter-subject-input')
-            .off('keydown')
-            .on('keydown', function (e) {
-                if (e.key === 'Enter' && this.value.trim()) {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    const chip = $(`
-        <span class="chip">
-          ${this.value.trim().toLowerCase()}
-          <button type="button" class="chip-remove">×</button>
-        </span>
-      `);
-                    chip.find('.chip-remove').on('click', function () {
-                        $(this).closest('.chip').remove();
-                    });
-                    $('#filter-subject-list').append(chip);
-                    this.value = '';
-                }
-            });
-
-        $(document).on(
-            'change',
-            "input[name='subjectFilterType']",
-            function () {
-                const subjectKeywordsSection = $('#subject-keywords-section');
-                const subjectInput = $('#filter-subject-input');
-                if ($(this).val() === 'any') {
-                    subjectKeywordsSection.hide();
-                    subjectInput.prop('disabled', true);
-                } else {
-                    subjectKeywordsSection.show();
-                    subjectInput.prop('disabled', false);
-
-                    const placeholder =
-                        $(this).val() === 'contains'
-                            ? 'Add keyword and press Enter'
-                            : 'Add keyword to exclude and press Enter';
-                    subjectInput.attr('placeholder', placeholder);
-                }
-            },
-        );
-
-        $(document).on('change', "input[name='fromFilterType']", function () {
-            const fromKeywordsSection = $('#from-keywords-section');
-            const fromInput = $('#filter-from-input');
-            if ($(this).val() === 'any') {
-                fromKeywordsSection.hide();
-                fromInput.prop('disabled', true);
-            } else {
-                fromKeywordsSection.show();
-                fromInput.prop('disabled', false);
-
-                const placeholder =
-                    $(this).val() === 'matches'
-                        ? 'Add keyword and press Enter'
-                        : 'Add keyword to exclude and press Enter';
-                fromInput.attr('placeholder', placeholder);
-            }
-        });
-    }
-
-    hm_sieve_button_events();
+    registerSieveModalEvents();
 
     $(document).on('click', '.remove-chip', function () {
         $(this).parent().remove();

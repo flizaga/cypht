@@ -366,7 +366,7 @@ function date_callback($vals, $style, $output_mod) {
     if ($style == 'news') {
         return sprintf('<div class="msg_date%s">%s<input type="hidden" class="msg_timestamp" value="%s" /></div>', $delayed_class, $output_mod->html_safe($vals[0]), $output_mod->html_safe($vals[1]));
     }
-    return sprintf('<td class="msg_date%s" title="%s">%s<input type="hidden" class="msg_timestamp" value="%s" /></td>', $delayed_class, $output_mod->html_safe(date('r', $vals[1])), $output_mod->html_safe($vals[0]), $output_mod->html_safe($vals[1]));
+    return sprintf('<td class="msg_date%s" title="%s">%s%s<input type="hidden" class="msg_timestamp" value="%s" /></td>', $delayed_class, $output_mod->html_safe(date('r', $vals[1])), ($delayed_class ? '<span class="badge bg-secondary-subtle text-body"><i class="bi bi-alarm"></i></span>': ''), $output_mod->html_safe($vals[0]), $output_mod->html_safe($vals[1]));
 }}
 
 function dates_holders_callback($vals) {
@@ -553,7 +553,7 @@ function update_search_label_field($search_term, $output_mod) {
     $res = '<div class="update_search_label_field">';
     $res .= '<div class="update_saved_search_title">'.$output_mod->html_safe('Update saved search label') .'</div>';
     $res .= '<div>
-    <input type="hidden" name="page" value="search">
+    <input type="hidden" name="'. $output_mod->get('page_param_name') .'" value="search">
     <input type="hidden" name="search_terms" value="'. $search_term .'">
     <label class="screen_reader" for="search_terms_label">Current Search Label</label>
     <input required="" disabled id="old_search_terms_label" type="search" value="' . $search_term . '" class="old_search_terms_label form-control form-control-sm" name="old_search_terms_label">

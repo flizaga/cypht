@@ -352,7 +352,10 @@ class Hm_Handler_imap_save_sent extends Hm_Handler_Module {
                 $this->out('sent_imap_id', $imap_id);
 
                 if ($this->user_config->get('review_sent_email_setting', false)) {
-                    $this->out('redirect_url', '?page=message&uid='.$uid.'&list_path=imap_'.$imap_id.'_'.bin2hex($sent_folder));
+                    $this->out('redirect_url', $this->build_page_url('message', array(
+                        'uid' => $uid,
+                        'list_path' => 'imap_'.$imap_id.'_'.bin2hex($sent_folder),
+                    )));
                 }
             }
         }
@@ -518,6 +521,54 @@ class Hm_Handler_imap_download_message extends Hm_Handler_Module {
 }
 
 /**
+ * Stream a file from the attachment directory to the browser (usually attachments found in MSTNEF messages)
+ * @subpackage imap/handler
+ */
+class Hm_Handler_imap_download_attachment extends Hm_Handler_Module {
+    /**
+     * Download a file from the attachment directory
+     */
+    public function process() {
+        if (array_key_exists('download_attachment', $this->request->get) && $file = $this->request->get['download_attachment']) {
+            $server_id = $this->request->get['imap_server_id'];
+            $uid = $this->request->get['imap_msg_uid'];
+            $folder = $this->request->get['imap_folder'];
+            $msg_part = $this->request->get['imap_msg_part'];
+
+            $mailbox = Hm_IMAP_List::get_connected_mailbox($server_id, $this->cache);
+
+            if (! $mailbox || ! $mailbox->authed()) {
+                Hm_Msgs::add('An Error occurred trying to download the attachment', 'danger');
+                return;
+            }
+
+            list(,, $msg_text) = $mailbox->get_structured_message(hex2bin($folder), $uid, $msg_part, $this->user_config->get('text_only_setting', false), true);
+
+            $filepath = parse_mstnef([
+                'tnefBinary' => $msg_text,
+                'attachmentDir' => $this->config->get('attachment_dir'),
+                'msgUid' => $uid,
+                'msgPart' => $msg_part,
+                'imapServerId' => $server_id,
+                'folder' => $folder,
+                'returnFile' => $file
+            ]);
+
+            if (file_exists($filepath)) {
+                header('Content-Disposition: attachment; filename="' . basename($filepath) . '"');
+                header('Content-Type: application/octet-stream');
+                header('Content-Transfer-Encoding: binary');
+
+                unlink($filepath);
+
+                Hm_Functions::cease();
+            }
+            Hm_Msgs::add('An Error occurred trying to download the attachment', 'danger');
+        }
+    }
+}
+
+/**
  * Process the list_path input argument
  * @subpackage imap/handler
  */
@@ -571,7 +622,7 @@ class Hm_Handler_imap_message_list_type extends Hm_Handler_Module {
                             $paths = explode("_", $path);
                             $short_path = $paths[0] . "_" . $paths[1] . "_";
                             $cached_folders = $this->cache->get('imap_folders_'.$short_path, true);
-                            $label = !empty($cached_folders[$folder]['name']) ? $cached_folders[$folder]['name'] : '';
+                            $label = !empty($cached_folders['folders'][$folder]['name']) ? $cached_folders['folders'][$folder]['name'] : '';
                         } else {
                             Hm_Msgs::add('Folder name loaded directly from the server. This may be slower. Enable session caching for better performance.', 'warning');
                             if (isset($details['type']) && $details['type'] === 'ews') {
@@ -627,7 +678,9 @@ class Hm_Handler_imap_remove_attachment extends Hm_Handler_Module {
                 if ($mailbox && $mailbox->authed()) {
                     if ($mailbox->remove_attachment($folder, $uid, $this->request->get['imap_msg_part'])) {
                         Hm_Msgs::add('Attachment deleted');
-                        $this->out('redirect_url', '?page=message_list&list_path=' . $this->request->get['list_path']);
+                        $this->out('redirect_url', $this->build_page_url('message_list', array(
+                            'list_path' => $this->request->get['list_path'],
+                        )));
                         return;
                     }
                 }
@@ -663,20 +716,32 @@ class Hm_Handler_imap_folder_expand extends Hm_Handler_Module {
             }
 
             // Check cache FIRST before connecting to IMAP
-            $page_cache = $this->cache->get('imap_folders_'.$path);
-            if ($page_cache && is_array($page_cache) && isset($page_cache['folders'])) {
-                $this->out('imap_expanded_folder_data', $page_cache['folders']);
-                $this->out('imap_expanded_folder_id', $form['imap_server_id']);
-                $this->out('imap_expanded_folder_path', $path);
-                $this->out('with_input', $with_subscription);
-                $this->out('folder', $folder);
-                $this->out('can_share_folders', $page_cache['can_share_folders']);
+            $cache_key = 'imap_folders_imap_'.$form['imap_server_id'].'_';
 
-                if (isset($page_cache['quota'])) {
-                    $this->out('quota', $page_cache['quota']);
-                    $this->out('quota_max', $page_cache['quota_max']);
+            $page_cache = $this->cache->get($cache_key);
+            if ($page_cache && is_array($page_cache)) {
+                if ($folder) {
+                    if (isset($page_cache[$folder])) {
+                        $page_cache = $page_cache[$folder];
+                    } else {
+                        $page_cache = false;
+                    }
                 }
-                return;
+
+                if (isset($page_cache['folders'])) {
+                    $this->out('imap_expanded_folder_data', $page_cache['folders']);
+                    $this->out('imap_expanded_folder_id', $form['imap_server_id']);
+                    $this->out('imap_expanded_folder_path', $path);
+                    $this->out('with_input', $with_subscription);
+                    $this->out('folder', $folder);
+                    $this->out('can_share_folders', $page_cache['can_share_folders']);
+
+                    if (isset($page_cache['quota'])) {
+                        $this->out('quota', $page_cache['quota']);
+                        $this->out('quota_max', $page_cache['quota_max']);
+                    }
+                    return;
+                }
             }
 
             $mailbox = Hm_IMAP_List::get_connected_mailbox($form['imap_server_id'], $this->cache);
@@ -721,7 +786,13 @@ class Hm_Handler_imap_folder_expand extends Hm_Handler_Module {
                 if (!empty($quota_data)) {
                     $cache_data = array_merge($cache_data, $quota_data);
                 }
-                $this->cache->set('imap_folders_'.$path, $cache_data);
+
+                $cached_data = $this->cache->get($cache_key, true) ?? [];
+                if ($folder) {
+                    $this->cache->set($cache_key, array_merge($cached_data, [$folder => $cache_data]));
+                } else {
+                    $this->cache->set($cache_key, $cache_data);
+                }
 
                 $this->out('imap_expanded_folder_data', $msgs);
                 $this->out('imap_expanded_folder_id', $form['imap_server_id']);
@@ -914,7 +985,7 @@ class Hm_Handler_load_imap_folders extends Hm_Handler_Module {
             list($success, $form) = $this->process_form(array('reset_cache'));
             $reset_cache = !empty($form['reset_cache']) ? $form['reset_cache'] : false;
             foreach ($servers as $id => $server) {
-                if ($this->config->get('allow_session_cache', false) && $reset_cache) {
+                if ($reset_cache) {
                     $this->cache->del('imap_folders_imap_'.$id.'_');
                 }
                 $folders[$id] = $server['name'];
@@ -992,7 +1063,11 @@ class Hm_Handler_imap_archive_message extends Hm_Handler_Module {
 
         $mailbox = Hm_IMAP_List::get_connected_mailbox($form['imap_server_id'], $this->cache);
         if ($mailbox && ! $mailbox->is_imap()) {
-            // EWS supports archiving to user archive folders
+            if (!$mailbox->is_inplace_archive_enabled()) {
+                Hm_Msgs::add('In-Place Archive is not enabled for this Exchange account. Please contact your administrator.', 'danger');
+                $this->save_hm_msgs();
+                return;
+            }
             $status = $mailbox->message_action($form_folder, 'ARCHIVE', array($form['imap_msg_uid']))['status'];
         } else {
             if (!$archive_folder) {
@@ -1264,7 +1339,7 @@ class Hm_Handler_imap_message_action extends Hm_Handler_Module {
 
         $folderNotFoundError = false;
         if (!$special_folder && $action_type != 'read' && $action_type != 'unread' && $action_type != 'flag' && $action_type != 'unflag' && $action_type != 'restore') {
-            Hm_Msgs::add(sprintf('No %s folder configured for %s. Please go to <a href="?page=folders&imap_server_id=%s">Folders settings</a> and configure one', $action_type, $server_details['name'], $server_details['id']), empty($moved) ? 'danger' : 'warning');
+            Hm_Msgs::add(sprintf('No %s folder configured for %s. Please go to <a href="%s">Folders settings</a> and configure one', $action_type, $server_details['name'], $this->build_page_url('folders', array('imap_server_id' => $server_details['id']))), empty($moved) ? 'danger' : 'warning');
             $folderNotFoundError = true;
         }
 
@@ -1418,7 +1493,8 @@ class Hm_Handler_imap_message_list extends Hm_Handler_Module {
             if($this->get('list_path') == 'snoozed' && !$mailbox->folder_exists('Snoozed')) {
                 continue;
             }
-            $uids = $mailbox->search(hex2bin($folders[$key]), $filter, $terms, $sort, $reverse);
+            $enable_exclude_auto_bcc = $this->user_config->get('enable_exclude_auto_bcc_setting', DEFAULT_SETTING_ENABLE_EXCLUDE_AUTO_BCC);
+            $uids = $mailbox->search(hex2bin($folders[$key]), $filter, $terms, $sort, $reverse, true, $enable_exclude_auto_bcc);
 
             $total = count($uids);
             $uids = array_slice($uids, 0, $limit);
@@ -1509,7 +1585,7 @@ class Hm_Handler_process_add_jmap_server extends Hm_Handler_Module {
                     'port' => false,
                     'tls' => false));
                 if (isPageConfigured('save')) {
-                    Hm_Msgs::add("Added server!. To preserve these settings after logout, please go to <a class='alert-link' href='?page=save'>Save Settings</a>.");
+                    Hm_Msgs::add("Added server!. To preserve these settings after logout, please go to <a class='alert-link' href='".$this->build_page_url('save')."'>Save Settings</a>.");
                     $this->session->record_unsaved('JMAP server added');
                 } else {
                     Hm_Msgs::add('Added server!');
@@ -1672,7 +1748,7 @@ class Hm_Handler_save_ews_server extends Hm_Handler_Module {
                 $this->user_config->set('special_imap_folders', $specials);
             }
             if (isPageConfigured('save')) {
-                Hm_Msgs::add("EWS server saved. To preserve these settings after logout, please go to <a class='alert-link' href='?page=save'>Save Settings</a>.");
+                Hm_Msgs::add("EWS server saved. To preserve these settings after logout, please go to <a class='alert-link' href='".$this->build_page_url('save')."'>Save Settings</a>.");
                 $this->session->record_unsaved('EWS server added');
             } else {
                 Hm_Msgs::add('EWS server saved.');
@@ -2011,7 +2087,7 @@ class Hm_Handler_imap_message_content extends Hm_Handler_Module {
                 else {
                     $mailbox->set_read_only($prefetch);
                 }
-                list($msg_struct, $msg_struct_current, $msg_text, $part) = $mailbox->get_structured_message(hex2bin($form['folder']), $form['imap_msg_uid'], $part, $this->user_config->get('text_only_setting', false));
+                list($msg_struct, $msg_struct_current, $msg_text, $part) = $mailbox->get_structured_message(hex2bin($form['folder']), $form['imap_msg_uid'], $part, $this->user_config->get('text_only_setting', false), $this->config->get('enable_mstnef_viewer'));
                 $save_reply_text = false;
                 if ($part == 0 || (isset($msg_struct_current['type']) && mb_strtolower($msg_struct_current['type'] == 'text'))) {
                     $save_reply_text = true;
@@ -2019,6 +2095,7 @@ class Hm_Handler_imap_message_content extends Hm_Handler_Module {
                 $msg_headers = $mailbox->get_message_headers(hex2bin($form['folder']), $form['imap_msg_uid']);
 
                 $this->out('is_archive_folder', $mailbox->is_archive_folder($form['imap_server_id'], $this->user_config, $form['folder']));
+                $this->out('ews_inplace_archive_enabled', $mailbox->is_inplace_archive_enabled());
                 $this->out('folder_status', array('imap_'.$form['imap_server_id'].'_'.$form['folder'] => $mailbox->get_folder_state()));
                 $this->out('msg_struct', $msg_struct);
                 $this->out('list_headers', get_list_headers($msg_headers));
@@ -2028,7 +2105,24 @@ class Hm_Handler_imap_message_content extends Hm_Handler_Module {
                 $this->out('use_message_part_icons', $this->user_config->get('msg_part_icons_setting', false));
                 $this->out('simple_msg_part_view', $this->user_config->get('simple_msg_parts_setting', DEFAULT_SIMPLE_MSG_PARTS));
                 $this->out('allow_delete_attachment', $this->user_config->get('allow_delete_attachment_setting', false));
+                $this->out('enable_mstnef_viewer', $this->config->get('enable_mstnef_viewer', false));
+                
                 if ($msg_struct_current) {
+                    if ($msg_struct_current['type'] == 'application' && $msg_struct_current['subtype'] == 'ms-tnef') {
+                        $msg_text = parse_mstnef([
+                            'tnefBinary' => $msg_text,
+                            'attachmentDir' => $this->config->get('attachment_dir'),
+                            'msgUid' => $form['imap_msg_uid'],
+                            'msgPart' => $part,
+                            'imapServerId' => $form['imap_server_id'],
+                            'folder' => $form['folder'],
+                            'returnFile' => false
+                        ]);
+
+                        $msg_struct_current['type'] = 'text';
+                        $msg_struct_current['subtype'] = 'html';
+                    }
+
                     $this->out('msg_struct_current', $msg_struct_current);
                 }
                 $this->out('msg_text', $msg_text);

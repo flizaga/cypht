@@ -249,6 +249,16 @@ class Hm_Handler_process_auto_bcc extends Hm_Handler_Module {
 /**
  * @subpackage smtp/handler
  */
+class Hm_Handler_process_enable_exclude_auto_bcc extends Hm_Handler_Module {
+    public function process() {
+        function enable_exclude_auto_bcc_callback($val) { return $val; }
+        process_site_setting('enable_exclude_auto_bcc', $this, 'enable_exclude_auto_bcc_callback', DEFAULT_SETTING_ENABLE_EXCLUDE_AUTO_BCC, true);
+    }
+}
+
+/**
+ * @subpackage smtp/handler
+ */
 class Hm_Handler_get_test_chunk extends Hm_Handler_Module {
     public function process() {
         $filepath = $this->config->get('attachment_dir');
@@ -988,7 +998,7 @@ class Hm_Output_enable_attachment_reminder_setting extends Hm_Output_Module {
  */
 class Hm_Output_sent_folder_link extends Hm_Output_Module {
     protected function output() {
-        $res = '<li class="menu_sent"><a class="unread_link" href="?page=message_list&amp;list_path=sent">';
+        $res = '<li class="menu_sent"><a class="unread_link" href="'.$this->build_page_url('message_list', array('list_path' => 'sent'), true).'">';
         if (!$this->get('hide_folder_icons')) {
             $res .= '<i class="bi bi-send-check-fill menu-icon"></i>';
         }
@@ -1014,7 +1024,7 @@ class Hm_Output_compose_form_start extends Hm_Output_Module {
         $res = '<div class="container">';
         $res .= '<div class="row justify-content-md-center">';
         $res .= '<div class="col col-lg-10 col-xl-8">';
-        $res .= '<form class="compose_form p-4" method="post" action="?page=compose" data-reminder="' . $this->get('enable_attachment_reminder', 0) . '">';
+        $res .= '<form class="compose_form p-4" method="post" action="'.$this->build_page_url('compose').'" data-reminder="' . $this->get('enable_attachment_reminder', 0) . '">';
         return $res;
     }
 }
@@ -1053,8 +1063,7 @@ class Hm_Output_compose_form_draft_list extends Hm_Output_Module {
         $res .= '<div class="draft_list">';
         foreach ($drafts as $id => $draft) {
             $subject = trim($draft['draft_subject']) ? trim($draft['draft_subject']) : 'Draft '.($id+1);
-            $res .= '<div class="draft_'.$this->html_safe($id).'"><a class="draft_link" href="?page=compose&draft_id='.
-                $this->html_safe($id).'">'.$this->html_safe($subject).'</a> '.
+            $res .= '<div class="draft_'.$this->html_safe($id).'"><a class="draft_link" href="'.$this->build_page_url('compose', array('draft_id' => $this->html_safe($id))).'">'.$this->html_safe($subject).'</a> '.
                 '<i class="bi bi-x-circle-fill delete_draft" data-id="'.$this->html_safe($id).'"></i></div>';
         }
         $res .= '</div>';
@@ -1428,6 +1437,27 @@ class Hm_Output_auto_bcc_setting extends Hm_Output_Module {
 /**
  * @subpackage smtp/output
  */
+class Hm_Output_exclude_auto_bcc_setting extends Hm_Output_Module {
+    protected function output() {
+        $auto = DEFAULT_SETTING_ENABLE_EXCLUDE_AUTO_BCC;
+        $settings = $this->get('user_settings', array());
+        if (array_key_exists('enable_exclude_auto_bcc', $settings)) {
+            $auto = $settings['enable_exclude_auto_bcc'];
+        }
+        $res = '<tr class="general_setting"><td><label class="form-check-label" for="enable_exclude_auto_bcc">'.$this->trans('Enable exclude auto BCC').'</label></td><td><input class="form-check-input" value="0" type="checkbox" name="enable_exclude_auto_bcc" id="enable_exclude_auto_bcc"  data-default-value="true"';
+        $reset = '';
+        if ($auto) {
+            $res .= ' checked="checked"';
+            $reset = '<span class="tooltip_restore" restore_aria_label="Restore default value"><i class="bi bi-arrow-counterclockwise refresh_list reset_default_value_checkbox"></i></span>';
+        }
+        $res .= '>'.$reset.'</td></tr>';
+        return $res;
+    }
+}
+
+/**
+ * @subpackage smtp/output
+ */
 class Hm_Output_filter_upload_file_details extends Hm_Output_Module {
     protected function output() {
         $file = $this->get('upload_file_details', array());
@@ -1529,7 +1559,7 @@ class Hm_Output_display_configured_smtp_servers extends Hm_Output_Module {
  */
 class Hm_Output_compose_page_link extends Hm_Output_Module {
     protected function output() {
-        $res = '<li class="menu_compose"><a class="unread_link" href="?page=compose">';
+        $res = '<li class="menu_compose"><a class="unread_link" href="'.$this->build_page_url('compose').'">';
         if (!$this->get('hide_folder_icons')) {
             $res .= '<i class="bi bi-file-earmark-text menu-icon"></i>';
         }
@@ -1667,7 +1697,6 @@ class Hm_Handler_re_schedule_message_sending extends Hm_Handler_Module {
             $msg = 'ERRFailed to schedule sending for messages';
         }
         Hm_Msgs::add($msg);
-        $this->save_hm_msgs();
     }
 }
 

@@ -355,6 +355,16 @@ Hm_Modal.prototype = {
     init: function() {
         this.destroy();
 
+        // Remove any orphaned modal element with the same ID
+        var orphan = document.getElementById(this.opts.modalId);
+        if (orphan) {
+            var orphanBsModal = bootstrap.Modal.getInstance(orphan);
+            if (orphanBsModal) {
+                orphanBsModal.dispose();
+            }
+            orphan.remove();
+        }
+
         const modal = `
             <div id="${this.opts.modalId}" class="modal fade modal-${this.opts.size}" data-bs-backdrop="static" tabindex="-1" aria-hidden="true">
                 <div class="modal-dialog">
@@ -1223,7 +1233,9 @@ var Hm_Folders = {
     observer : false,
 
     save_folder_list: function() {
-        Hm_Utils.save_to_local_storage('formatted_folder_list', $('.folder_list').html());
+        const toSave = $('.folder_list').clone();
+        toSave.find('.temp').remove();
+        Hm_Utils.save_to_local_storage('formatted_folder_list', toSave.html());
     },
 
     load_unread_counts: function() {
@@ -1332,7 +1344,7 @@ var Hm_Folders = {
         $('.folder_list').hide();
         $('.folder_toggle').show();
         if (!forget) {
-            Hm_Utils.save_to_local_storage('formatted_folder_list', $('.folder_list').html());
+            Hm_Folders.save_folder_list();
             Hm_Utils.save_to_local_storage('hide_folder_list', '1');
             $('main').css('display', 'block');
         }
@@ -1343,7 +1355,7 @@ var Hm_Folders = {
         if (document.cookie.indexOf('hm_reload_folders=1') > -1 || force) {
             Hm_Folders.expand_after_update = expand_after_update;
             var ui_state = Hm_Utils.preserve_local_settings();
-            Hm_Folders.update_folder_list();
+            Hm_Folders.update_folder_list(true);
             sessionStorage.clear();
             Hm_Utils.restore_local_settings(ui_state);
             return true;
@@ -1380,6 +1392,7 @@ var Hm_Folders = {
         Hm_Utils.save_to_local_storage('formatted_folder_list', $('.folder_list').html());
         Hm_Folders.hl_selected_menu();
         Hm_Folders.folder_list_events();
+        toggleExpandableNavbarItems(Hm_Utils.get_from_local_storage('navbar_collapsed'));
         if (Hm_Folders.expand_after_update) {
             Hm_Utils.toggle_section(Hm_Folders.expand_after_update);
         }
@@ -1474,6 +1487,7 @@ var Hm_Folders = {
         var folder_list = Hm_Utils.get_from_local_storage('formatted_folder_list');
         if (folder_list) {
             $('.folder_list').html(folder_list);
+            toggleExpandableNavbarItems(Hm_Utils.get_from_local_storage('navbar_collapsed'))
             if (Hm_Utils.get_from_local_storage('hide_folder_list') == '1') {
                 $('.folder_list').hide();
                 $('.folder_toggle').show();
@@ -1534,7 +1548,7 @@ var Hm_Utils = {
         var prefix = window.location.pathname.length;
         for (i in sessionStorage) {
             i = i.substr(prefix);
-            if (i.match(/\..+(_setting|_section)/)) {
+            if (i.match(/\..+(_setting|_section)/) || i == 'navbar_collapsed') {
                 result[i] = Hm_Utils.get_from_local_storage(i);
             }
         }
@@ -1634,7 +1648,8 @@ var Hm_Utils = {
                 $(class_name).css('display', 'none');
             }
             $(`[data-bs-target="${class_name}"]`).trigger('click');
-            Hm_Utils.save_to_local_storage('formatted_folder_list', $('.folder_list').html());
+
+            Hm_Folders.save_folder_list();
         }
         return false;
     },
@@ -2673,6 +2688,9 @@ function setupActionSnooze(callback) {
     $(document).on('click', '.nexter_date_helper_snooze', function (e) {
         e.preventDefault();
         $('.nexter_input_snooze').val($(this).attr('data-value')).trigger('change');
+
+        const dropdown = bootstrap.Dropdown.getOrCreateInstance($('#dropdownMenuSnooze')[0]);
+        dropdown.toggle();
     });
     $(document).on('input', '.nexter_input_date_snooze', function (e) {
         var now = new Date();
